@@ -1,0 +1,40 @@
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# Python Cache & Compiled Files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Unsloth & Gradio Cache
+.gradio/
+unsloth_compiled_cache/
+
+# Training Outputs & Heavy Model Weights
+outputs/
+data/lora_model_1b/
+*.safetensors
+*.bin
+*.pth
+*.pt
+*.onnx
+
+# Datasets / Large Data Files (Opsional - uncomment jika tidak ingin di-push)
+# data/cleaned_text.jsonl
+# data/raw_text.jsonl
+# data/permenkes-no-10-tahun-2024.pdf
+
+# Environment Variables & Keys
+.env
+.env.local
+
+# IDE & Editor Files
+.vscode/
+.idea/
+
+# Operating System Files
+Thumbs.db
+Desktop.ini
+.DS_Store
