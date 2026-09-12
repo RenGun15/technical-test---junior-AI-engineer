@@ -1,0 +1,16 @@
+unsloth @ git+https://github.com/unslothai/unsloth.git
+unsloth_zoo
+torch
+torchao
+trl
+peft
+cut_cross_entropy
+transformers
+datasets
+huggingface_hub
+hf_transfer
+msgspec
+bitsandbytes
+xformers
+accelerate
+ipywidgets
