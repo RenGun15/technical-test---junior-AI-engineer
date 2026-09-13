@@ -28,8 +28,6 @@ data/lora_model_1b/
 
 # Environment Variables & Keys
 .env
-.env.*
-!.env.example
 .env.local
 
 # IDE & Editor Files
