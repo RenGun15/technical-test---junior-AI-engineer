@@ -4,13 +4,12 @@ from unsloth import FastLanguageModel
 # 2. Transformers & PyTorch
 import os
 import torch
-from transformers import TrainingArguments
 
 # 3. TRL & Datasets
 from datasets import load_dataset
 from trl import SFTConfig, SFTTrainer
 
-# 1. Path Relatif Lokal (Otomatis menyesuaikan folder proyek VS Code)
+# Path Relatif Lokal
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 TRAIN_JSONL_PATH = os.path.join(DATA_DIR, "cleaned_text.jsonl")
@@ -34,10 +33,10 @@ ALPACA_PROMPT = """Below is an instruction that describes a task, paired with an
 def format_prompts(examples, tokenizer):
     texts = []
 
-    # Skenario 1: Dataset menggunakan format Alpaca (instruction, input, output)
-    if "instruction" in examples:
+    # Hanya terima format QA yang valid (instruction, input, output)
+    if "instruction" in examples and "output" in examples:
         instructions = examples["instruction"]
-        inputs = examples["input"]
+        inputs = examples.get("input", [""] * len(instructions))
         outputs = examples["output"]
 
         for inst, inp, out in zip(instructions, inputs, outputs):
@@ -45,36 +44,22 @@ def format_prompts(examples, tokenizer):
                 ALPACA_PROMPT.format(inst, inp, out) + tokenizer.eos_token
             )
             texts.append(formatted_text)
-
-    # Skenario 2: Dataset menggunakan format mentah (text, page)
-    elif "text" in examples:
-        instruction_text = "Pelajari dokumen berikut untuk memahami isi Peraturan Kesehatan Permenkes No 10 Tahun 2024:"
-        for text_content, page_num in zip(
-            examples["text"], examples.get("page", range(len(examples["text"])))
-        ):
-            input_content = f"Halaman {page_num}:\n{text_content}"
-            output_content = "Dokumen berhasil dipelajari."
-            formatted_text = (
-                ALPACA_PROMPT.format(
-                    instruction_text, input_content, output_content
-                )
-                + tokenizer.eos_token
-            )
-            texts.append(formatted_text)
+    else:
+        raise ValueError(
+            "❌ Dataset harus memiliki kolom 'instruction' dan 'output'! "
+            "Format teks mentah dengan dummy response tidak bisa digunakan untuk Q&A fine-tuning."
+        )
 
     return {"text": texts}
 
 
 def run_finetuning():
-    # A. Validasi keberadaan dataset
     if not os.path.exists(TRAIN_JSONL_PATH):
         print(f"❌ Error: File '{TRAIN_JSONL_PATH}' tidak ditemukan!")
-        print("👉 Jalankan 'preprocessing.py' terlebih dahulu.")
         return
 
     max_seq_length = 2048
 
-    # B. Inisialisasi Model & Tokenizer Unsloth
     print("⏳ Memuat model Unsloth Llama-3.2 1B (4-bit)...")
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name="unsloth/Llama-3.2-1B-bnb-4bit",
@@ -82,19 +67,11 @@ def run_finetuning():
         load_in_4bit=True,
     )
 
-    # C. Konfigurasi Adapter LoRA
+    # Konfigurasi LoRA yang lebih ideal untuk model 1B
     model = FastLanguageModel.get_peft_model(
         model,
         r=16,
-        target_modules=[
-            "q_proj",
-            "k_proj",
-            "v_proj",
-            "o_proj",
-            "gate_proj",
-            "up_proj",
-            "down_proj",
-        ],
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
         lora_alpha=16,
         lora_dropout=0,
         bias="none",
@@ -102,20 +79,17 @@ def run_finetuning():
         random_state=3407,
     )
 
-    # D. Load Dataset JSONL
     print(f"⏳ Memuat dataset dari: {TRAIN_JSONL_PATH}")
     dataset_train = load_dataset(
         "json", data_files={"train": TRAIN_JSONL_PATH}, split="train"
     )
 
-    # Apply pemformatan prompt
     dataset_train = dataset_train.map(
         lambda examples: format_prompts(examples, tokenizer), batched=True
     )
 
-    print(f"✅ Total baris/halaman berhasil dimuat: {len(dataset_train)}")
+    print(f"✅ Total sampel QA berhasil dimuat: {len(dataset_train)}")
 
-    # E. Konfigurasi SFTTrainer
     args = SFTConfig(
         dataset_text_field="text",
         max_seq_length=max_seq_length,
@@ -124,13 +98,13 @@ def run_finetuning():
         gradient_accumulation_steps=4,
         warmup_steps=5,
         max_steps=60,
-        learning_rate=2e-4,
+        learning_rate=1e-4,  # Diturunkan sedikit agar lebih stabil
         fp16=not torch.cuda.is_bf16_supported(),
         bf16=torch.cuda.is_bf16_supported(),
         logging_steps=1,
         optim="adamw_8bit",
         output_dir=OUTPUT_DIR,
-        dataset_num_proc=1,  # Menggunakan 1 process untuk menghindari multiprocessing error di Windows
+        dataset_num_proc=1,
     )
 
     trainer = SFTTrainer(
@@ -140,11 +114,9 @@ def run_finetuning():
         args=args,
     )
 
-    # F. Mulai Fine-Tuning
     print("🚀 Memulai proses Fine-Tuning...")
     trainer.train()
 
-    # G. Simpan Hasil Model LoRA
     model.save_pretrained(SAVE_PATH)
     tokenizer.save_pretrained(SAVE_PATH)
     print(f"🎉 Fine-Tuning selesai! Model LoRA disimpan di: '{SAVE_PATH}'")
